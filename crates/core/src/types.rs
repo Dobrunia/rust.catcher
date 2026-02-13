@@ -54,8 +54,6 @@ pub struct HawkEvent {
  * tolerates being absent.
  *
  * Key invariants (matching Node.js behaviour):
- * - `breadcrumbs` must be `None` (serialized as JSON `null`) when empty,
- *   never an empty array `[]`.
  * - `context` is a shallow merge of global context + per-event context.
  * - `catcher_version` is always present.
  */
@@ -75,11 +73,6 @@ pub struct EventData {
     /// `None` when no backtrace is available.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub backtrace: Option<Vec<BacktraceFrame>>,
-
-    /// Breadcrumb trail leading up to the event.
-    /// Must be `None` (not `Some(vec![])`) when there are no breadcrumbs.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub breadcrumbs: Option<Vec<Breadcrumb>>,
 
     /// Application release / version string set during `init()`.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -134,29 +127,6 @@ pub struct BacktraceFrame {
 }
 
 // ---------------------------------------------------------------------------
-// Breadcrumb
-// ---------------------------------------------------------------------------
-
-/**
- * A single breadcrumb — a timestamped log entry that provides context
- * about what happened before the error.
- *
- * The SDK keeps a ring buffer of at most 50 breadcrumbs (oldest evicted).
- * When the buffer is empty, `None` is sent (not an empty array).
- */
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Breadcrumb {
-    /// ISO-8601 timestamp of when the breadcrumb was recorded.
-    pub timestamp: String,
-
-    /// Human-readable description of the breadcrumb event.
-    pub message: String,
-
-    /// Severity level of this breadcrumb.
-    pub level: Level,
-}
-
-// ---------------------------------------------------------------------------
 // User
 // ---------------------------------------------------------------------------
 
@@ -190,7 +160,7 @@ pub struct User {
 // ---------------------------------------------------------------------------
 
 /**
- * Severity level for events and breadcrumbs.
+ * Severity level for events.
  *
  * Serialized as lowercase strings to match the backend's `type` field:
  * `"debug"`, `"info"`, `"warn"`, `"error"`, `"fatal"`.
@@ -257,6 +227,3 @@ pub const CATCHER_TYPE: &str = "errors/rust";
 
 /// SDK version string included in every event payload.
 pub const CATCHER_VERSION: &str = "hawk-rust/0.1.0";
-
-/// Maximum number of breadcrumbs kept in the ring buffer.
-pub const MAX_BREADCRUMBS: usize = 50;

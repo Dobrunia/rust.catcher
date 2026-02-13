@@ -93,10 +93,6 @@ pub struct Options {
     /// Default: `2000` (2 seconds).
     pub flush_timeout_ms: u64,
 
-    /// If `true`, breadcrumb collection is disabled entirely.
-    /// Default: `false`.
-    pub disable_breadcrumbs: bool,
-
     /// Optional callback invoked before each event is sent.
     ///
     /// Allows the user to:
@@ -116,7 +112,6 @@ impl Default for Options {
             environment: None,
             queue_capacity: 100,
             flush_timeout_ms: 2000,
-            disable_breadcrumbs: false,
             before_send: None,
         }
     }
@@ -134,7 +129,7 @@ impl Default for Options {
  * - The resolved collector endpoint URL.
  * - The bounded channel sender (events are enqueued here).
  * - A handle to the background worker thread.
- * - The shared `ContextManager` for tags, extras, user, breadcrumbs.
+ * - The shared `ContextManager` for tags, extras, user.
  * - Snapshot of `Options` fields needed at send-time.
  */
 pub struct Client {
@@ -144,7 +139,7 @@ pub struct Client {
     /// Sender side of the bounded event channel.
     sender: Sender<WorkerMsg>,
 
-    /// Shared context manager (tags, extras, user, breadcrumbs).
+    /// Shared context manager (tags, extras, user).
     pub(crate) context: Arc<ContextManager>,
 
     /// Application release string, cloned from options.
@@ -229,7 +224,7 @@ impl Client {
         /*
          * Step 5: Build the context manager.
          */
-        let context = Arc::new(ContextManager::new(!options.disable_breadcrumbs));
+        let context = Arc::new(ContextManager::new());
 
         /*
          * Build the client with snapshots of relevant options.
@@ -261,7 +256,7 @@ impl Client {
      *
      * This is the internal "send" path used by all public `capture_*` functions.
      * It:
-     * 1. Attaches global context (tags, extras), breadcrumbs, user, release.
+     * 1. Attaches global context (tags, extras), user, release.
      * 2. Runs the `before_send` callback if configured.
      * 3. Wraps the payload in a `HawkEvent` envelope.
      * 4. Enqueues the envelope on the bounded channel (non-blocking).
@@ -314,14 +309,6 @@ impl Client {
                     map.insert("service".into(), serde_json::Value::String(svc.clone()));
                 }
             }
-        }
-
-        /*
-         * Take breadcrumbs from the ring buffer.
-         * Returns None if empty — matching Node.js `null` convention.
-         */
-        if event.breadcrumbs.is_none() {
-            event.breadcrumbs = self.context.take_breadcrumbs();
         }
 
         /*

@@ -221,7 +221,6 @@ fn handle_panic(info: &PanicHookInfo) {
         } else {
             Some(frames)
         },
-        breadcrumbs: None, /* filled in by Client::send_event from context */
         release: None,     /* filled in by Client::send_event from options */
         user: None,        /* filled in by Client::send_event from context */
         context: Some(serde_json::Value::Object(context_map)),

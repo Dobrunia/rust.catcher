@@ -7,7 +7,6 @@
  * - **Tags** — string key-value pairs for indexing / filtering in the UI.
  * - **Extras** — arbitrary string key-value pairs for additional debugging info.
  * - **User** — the currently authenticated user.
- * - **Breadcrumbs** — a ring buffer of recent actions / log entries (max 50).
  *
  * All public methods acquire a `RwLock` and are safe to call from any thread.
  * The manager is wrapped in `Arc` so it can be shared between the public API
@@ -17,10 +16,10 @@
  * `Object.assign({}, globalContext, eventContext)` — a shallow merge where
  * per-event fields override global ones.
  */
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::sync::RwLock;
 
-use crate::types::{Breadcrumb, User, MAX_BREADCRUMBS};
+use crate::types::User;
 
 // ---------------------------------------------------------------------------
 // ContextManager
@@ -30,7 +29,7 @@ use crate::types::{Breadcrumb, User, MAX_BREADCRUMBS};
  * Holds all mutable ambient state that gets attached to every event.
  *
  * Internally protected by a `RwLock` so that reads (building context for an
- * event) and writes (user calling `set_tag`, `add_breadcrumb`, etc.) can
+ * event) and writes (user calling `set_tag`, `set_extra`, etc.) can
  * coexist with minimal contention.
  */
 pub struct ContextManager {
@@ -50,32 +49,18 @@ struct Inner {
 
     /// The currently authenticated user, if any.
     user: Option<User>,
-
-    /// Fixed-capacity ring buffer of breadcrumbs.
-    /// When full, the oldest entry is evicted to make room.
-    breadcrumbs: VecDeque<Breadcrumb>,
-
-    /// Whether breadcrumb collection is enabled.
-    /// When `false`, `add_breadcrumb` is a no-op.
-    breadcrumbs_enabled: bool,
 }
 
 impl ContextManager {
     /**
      * Creates a new, empty `ContextManager`.
-     *
-     * # Arguments
-     * * `breadcrumbs_enabled` — If `false`, calls to `add_breadcrumb` are
-     *   silently ignored. This mirrors the Node.js `breadcrumbs: false` option.
      */
-    pub fn new(breadcrumbs_enabled: bool) -> Self {
+    pub fn new() -> Self {
         Self {
             inner: RwLock::new(Inner {
                 tags: HashMap::new(),
                 extras: HashMap::new(),
                 user: None,
-                breadcrumbs: VecDeque::with_capacity(MAX_BREADCRUMBS),
-                breadcrumbs_enabled,
             }),
         }
     }
@@ -143,52 +128,6 @@ impl ContextManager {
      */
     pub fn get_user(&self) -> Option<User> {
         self.inner.read().ok().and_then(|inner| inner.user.clone())
-    }
-
-    // -----------------------------------------------------------------------
-    // Breadcrumbs
-    // -----------------------------------------------------------------------
-
-    /**
-     * Appends a breadcrumb to the ring buffer.
-     *
-     * If breadcrumbs are disabled (via `Options.disable_breadcrumbs`), this
-     * is a no-op.
-     *
-     * If the buffer is full (50 entries), the oldest breadcrumb is evicted
-     * before the new one is appended.
-     *
-     * # Arguments
-     * * `breadcrumb` — The breadcrumb entry to record.
-     */
-    pub fn add_breadcrumb(&self, breadcrumb: Breadcrumb) {
-        if let Ok(mut inner) = self.inner.write() {
-            if !inner.breadcrumbs_enabled {
-                return;
-            }
-            if inner.breadcrumbs.len() >= MAX_BREADCRUMBS {
-                inner.breadcrumbs.pop_front();
-            }
-            inner.breadcrumbs.push_back(breadcrumb);
-        }
-    }
-
-    /**
-     * Takes all current breadcrumbs, leaving the buffer empty.
-     *
-     * Returns `None` if the buffer is empty or breadcrumbs are disabled,
-     * matching the Node.js convention of sending `null` instead of `[]`.
-     */
-    pub fn take_breadcrumbs(&self) -> Option<Vec<Breadcrumb>> {
-        if let Ok(mut inner) = self.inner.write() {
-            if inner.breadcrumbs.is_empty() {
-                return None;
-            }
-            let crumbs: Vec<Breadcrumb> = inner.breadcrumbs.drain(..).collect();
-            Some(crumbs)
-        } else {
-            None
-        }
     }
 
     // -----------------------------------------------------------------------

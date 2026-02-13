@@ -63,7 +63,7 @@ pub mod worker;
 pub use client::Options;
 pub use guard::Guard;
 pub use types::{
-    BacktraceFrame, BeforeSendResult, Breadcrumb, EventData, HawkEvent, Level, User,
+    BacktraceFrame, BeforeSendResult, EventData, HawkEvent, Level, User,
     CATCHER_VERSION,
 };
 
@@ -128,7 +128,6 @@ pub fn capture_message(message: &str, level: Level) {
             title: message.to_string(),
             event_type: Some(level.as_str().to_string()),
             backtrace: None,
-            breadcrumbs: None,
             release: None,
             user: None,
             context: None,
@@ -176,7 +175,6 @@ pub fn capture_error(error: &dyn std::error::Error) {
             } else {
                 Some(frames)
             },
-            breadcrumbs: None,
             release: None,
             user: None,
             context: None,
@@ -262,33 +260,6 @@ pub fn set_extra(key: &str, value: &str) {
 pub fn set_user(user: User) {
     if let Some(client) = client::get_client() {
         client.context.set_user(user);
-    }
-}
-
-/**
- * Records a breadcrumb that will be attached to the next captured event.
- *
- * Breadcrumbs form a trail of recent actions leading up to an error,
- * providing valuable context for debugging.
- *
- * The SDK keeps at most 50 breadcrumbs in a FIFO ring buffer.
- * Oldest entries are evicted when the buffer is full.
- *
- * # Arguments
- * * `breadcrumb` — The breadcrumb entry to record.
- *
- * # Example
- * ```ignore
- * hawk::add_breadcrumb(hawk::Breadcrumb {
- *     timestamp: chrono::Utc::now().to_rfc3339(),
- *     message: "User clicked 'Submit'".into(),
- *     level: hawk::Level::Info,
- * });
- * ```
- */
-pub fn add_breadcrumb(breadcrumb: Breadcrumb) {
-    if let Some(client) = client::get_client() {
-        client.context.add_breadcrumb(breadcrumb);
     }
 }
 
