@@ -11,20 +11,10 @@
  * use hawk_core as hawk;
  *
  * fn main() {
- *     let _guard = hawk::init("YOUR_BASE64_TOKEN", hawk::Options {
- *         release: Some("1.0.0".into()),
- *         environment: Some("production".into()),
- *         ..Default::default()
- *     }).expect("Failed to init Hawk");
+ *     let _guard = hawk::init("YOUR_BASE64_TOKEN", Default::default())
+ *         .expect("Failed to init Hawk");
  *
  *     hawk::capture_message("Application started");
- *
- *     hawk::set_tag("region", "eu");
- *     hawk::set_extra("build", "release");
- *     hawk::set_user(hawk::User {
- *         id: Some("42".into()),
- *         ..Default::default()
- *     });
  *
  *     // ... your application logic ...
  *
@@ -36,8 +26,8 @@
  *
  * - `init()` creates a global `Client` (stored in `OnceLock`) and spawns
  *   a background worker thread that drains events from a bounded channel.
- * - `capture_*` functions build an `EventData`, attach global context,
- *   and enqueue it on the channel (non-blocking).
+ * - `capture_*` functions build an `EventData` and enqueue it on the
+ *   channel (non-blocking).
  * - The worker POSTs each event as a `HawkEvent` envelope to the Hawk
  *   collector via `reqwest` (blocking HTTP in the dedicated thread).
  * - `Guard::drop()` calls `flush()` to ensure pending events are delivered
@@ -49,7 +39,6 @@
 // ---------------------------------------------------------------------------
 
 pub mod client;
-pub mod context;
 pub mod guard;
 pub mod token;
 pub mod transport;
@@ -63,7 +52,7 @@ pub mod worker;
 pub use client::Options;
 pub use guard::Guard;
 pub use types::{
-    BacktraceFrame, BeforeSendResult, EventData, HawkEvent, User,
+    BacktraceFrame, BeforeSendResult, EventData, HawkEvent,
     CATCHER_VERSION,
 };
 
@@ -131,9 +120,6 @@ pub fn capture_message(message: &str) {
             title: message.to_string(),
             event_type: Some("message".to_string()),
             backtrace: None,
-            release: None,
-            user: None,
-            context: None,
             catcher_version: CATCHER_VERSION.to_string(),
         };
         client.send_event(event);
@@ -178,9 +164,6 @@ pub fn capture_error(error: &dyn std::error::Error) {
             } else {
                 Some(frames)
             },
-            release: None,
-            user: None,
-            context: None,
             catcher_version: CATCHER_VERSION.to_string(),
         };
         client.send_event(event);
@@ -200,69 +183,11 @@ pub fn capture_error(error: &dyn std::error::Error) {
  *
  * # Arguments
  * * `event` — A fully or partially constructed `EventData`. The client
- *   will fill in missing fields (release, user, context) from global state.
+ *   will fill in `catcher_version` if missing.
  */
 pub fn capture_event(event: EventData) {
     if let Some(client) = client::get_client() {
         client.send_event(event);
-    }
-}
-
-/**
- * Sets a global tag that will be attached to all subsequent events.
- *
- * Tags are string key-value pairs useful for filtering and grouping
- * events in the Hawk dashboard.
- *
- * Overwrites any existing tag with the same key.
- *
- * # Arguments
- * * `key` — Tag name (e.g. `"region"`, `"deployment"`).
- * * `value` — Tag value (e.g. `"eu-west-1"`, `"canary"`).
- */
-pub fn set_tag(key: &str, value: &str) {
-    if let Some(client) = client::get_client() {
-        client.context.set_tag(key, value);
-    }
-}
-
-/**
- * Sets a global extra that will be attached to all subsequent events.
- *
- * Extras are free-form key-value pairs for additional debugging context.
- *
- * Overwrites any existing extra with the same key.
- *
- * # Arguments
- * * `key` — Extra key (e.g. `"request_id"`, `"correlation_id"`).
- * * `value` — Extra value.
- */
-pub fn set_extra(key: &str, value: &str) {
-    if let Some(client) = client::get_client() {
-        client.context.set_extra(key, value);
-    }
-}
-
-/**
- * Sets the current user that will be attached to all subsequent events.
- *
- * Replaces any previously set user.
- *
- * # Arguments
- * * `user` — The affected user. At minimum, `id` should be set.
- *
- * # Example
- * ```ignore
- * hawk::set_user(hawk::User {
- *     id: Some("user_42".into()),
- *     name: Some("Alice".into()),
- *     ..Default::default()
- * });
- * ```
- */
-pub fn set_user(user: User) {
-    if let Some(client) = client::get_client() {
-        client.context.set_user(user);
     }
 }
 

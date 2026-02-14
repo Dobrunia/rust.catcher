@@ -1,11 +1,11 @@
 /**
  * The Hawk SDK client — central orchestrator that owns the event queue,
- * background worker, context manager, and transport.
+ * background worker, and transport.
  *
  * Lifecycle:
  * 1. User calls `hawk::init(token, options)` → creates a `Client` and
  *    stores it in a global `OnceLock`.
- * 2. All `hawk::capture_*` / `hawk::set_*` calls read the global `Client`.
+ * 2. All `hawk::capture_*` calls read the global `Client`.
  * 3. `hawk::init` returns a `Guard`; when the guard is dropped, it calls
  *    `Client::flush()` to drain pending events before the process exits.
  *
@@ -17,7 +17,6 @@ use std::time::Duration;
 
 use crossbeam_channel::{Sender, TrySendError};
 
-use crate::context::ContextManager;
 use crate::token;
 use crate::transport::Transport;
 use crate::types::{
@@ -33,7 +32,7 @@ use crate::worker::{FlushSignal, Worker, WorkerMsg};
  * Process-wide singleton holding the initialized `Client`.
  *
  * `OnceLock` ensures that `init()` can only succeed once — subsequent calls
- * are no-ops. All public free functions (`capture_message`, `set_tag`, etc.)
+ * are no-ops. All public free functions (`capture_message`, etc.)
  * access this global via `get_client()`.
  */
 static GLOBAL_CLIENT: OnceLock<Client> = OnceLock::new();
@@ -59,8 +58,7 @@ pub fn get_client() -> Option<&'static Client> {
  * # Example
  * ```ignore
  * hawk::init("BASE64_TOKEN", hawk::Options {
- *     release: Some("1.2.3".into()),
- *     environment: Some("production".into()),
+ *     queue_capacity: 200,
  *     ..Default::default()
  * });
  * ```
@@ -70,18 +68,6 @@ pub struct Options {
     /// endpoint from the integration token:
     /// `https://{integrationId}.k1.hawk.so/`
     pub collector_endpoint: Option<String>,
-
-    /// Logical service name (e.g. `"payments"`, `"gateway"`).
-    /// Informational only — sent inside context if set.
-    pub service: Option<String>,
-
-    /// Application release / version string (e.g. `"1.2.3"`, git SHA).
-    /// Attached to every event as `payload.release`.
-    pub release: Option<String>,
-
-    /// Deployment environment (e.g. `"production"`, `"staging"`).
-    /// Informational — sent inside context if set.
-    pub environment: Option<String>,
 
     /// Bounded channel capacity. When the queue is full, new events are
     /// dropped silently (back-pressure).
@@ -107,9 +93,6 @@ impl Default for Options {
     fn default() -> Self {
         Self {
             collector_endpoint: None,
-            service: None,
-            release: None,
-            environment: None,
             queue_capacity: 100,
             flush_timeout_ms: 2000,
             before_send: None,
@@ -126,10 +109,7 @@ impl Default for Options {
  *
  * Owns:
  * - The raw token string (passed through in every envelope).
- * - The resolved collector endpoint URL.
  * - The bounded channel sender (events are enqueued here).
- * - A handle to the background worker thread.
- * - The shared `ContextManager` for tags, extras, user.
  * - Snapshot of `Options` fields needed at send-time.
  */
 pub struct Client {
@@ -138,18 +118,6 @@ pub struct Client {
 
     /// Sender side of the bounded event channel.
     sender: Sender<WorkerMsg>,
-
-    /// Shared context manager (tags, extras, user).
-    pub(crate) context: Arc<ContextManager>,
-
-    /// Application release string, cloned from options.
-    release: Option<String>,
-
-    /// Application environment string, cloned from options.
-    environment: Option<String>,
-
-    /// Application service name, cloned from options.
-    service: Option<String>,
 
     /// Optional before_send callback.
     before_send: Option<Arc<dyn Fn(EventData) -> BeforeSendResult + Send + Sync>>,
@@ -161,7 +129,6 @@ pub struct Client {
 /**
  * `Client` is `Send + Sync` because:
  * - `Sender<WorkerMsg>` is `Send + Sync`.
- * - `Arc<ContextManager>` is `Send + Sync`.
  * - `Arc<dyn Fn + Send + Sync>` is `Send + Sync`.
  * - All other fields are plain data.
  */
@@ -178,7 +145,7 @@ impl Client {
      * # Steps
      * 1. Decode the integration token to extract `integrationId`.
      * 2. Resolve the collector endpoint (custom or default).
-     * 3. Create the bounded channel and context manager.
+     * 3. Create the bounded channel.
      * 4. Build and spawn the transport + worker.
      * 5. Store the client in `GLOBAL_CLIENT`.
      *
@@ -219,12 +186,7 @@ impl Client {
          * Step 4: Create the transport (HTTP client) and spawn the worker.
          */
         let transport = Transport::new()?;
-        let _worker = Worker::spawn(receiver, endpoint.clone(), transport);
-
-        /*
-         * Step 5: Build the context manager.
-         */
-        let context = Arc::new(ContextManager::new());
+        let _worker = Worker::spawn(receiver, endpoint, transport);
 
         /*
          * Build the client with snapshots of relevant options.
@@ -232,16 +194,12 @@ impl Client {
         let client = Client {
             token: token_str.to_string(),
             sender,
-            context,
-            release: options.release,
-            environment: options.environment,
-            service: options.service,
             before_send: options.before_send,
             flush_timeout: Duration::from_millis(options.flush_timeout_ms),
         };
 
         /*
-         * Step 6: Store in the global singleton.
+         * Step 5: Store in the global singleton.
          * `set()` returns `Err(value)` if already initialized.
          */
         GLOBAL_CLIENT
@@ -256,7 +214,7 @@ impl Client {
      *
      * This is the internal "send" path used by all public `capture_*` functions.
      * It:
-     * 1. Attaches global context (tags, extras), user, release.
+     * 1. Fills in `catcher_version` if empty.
      * 2. Runs the `before_send` callback if configured.
      * 3. Wraps the payload in a `HawkEvent` envelope.
      * 4. Enqueues the envelope on the bounded channel (non-blocking).
@@ -264,51 +222,14 @@ impl Client {
      * If the queue is full, the event is silently dropped.
      *
      * # Arguments
-     * * `event` — The event data to send. May be partially filled; this
-     *   method fills in remaining fields from global state.
+     * * `event` — The event data to send.
      */
     pub fn send_event(&self, mut event: EventData) {
         /*
-         * Fill in SDK-level fields if not already set by the caller.
+         * Fill in the catcher version if the caller didn't set it.
          */
-        if event.release.is_none() {
-            event.release = self.release.clone();
-        }
         if event.catcher_version.is_empty() {
             event.catcher_version = CATCHER_VERSION.to_string();
-        }
-
-        /*
-         * Attach the current user from context if not overridden per-event.
-         */
-        if event.user.is_none() {
-            event.user = self.context.get_user();
-        }
-
-        /*
-         * Merge context: combine global tags/extras with per-event context.
-         */
-        event.context = self.context.build_context(event.context.as_ref());
-
-        /*
-         * Attach environment and service to context if set.
-         */
-        if self.environment.is_some() || self.service.is_some() {
-            let ctx = event
-                .context
-                .get_or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
-
-            if let serde_json::Value::Object(map) = ctx {
-                if let Some(ref env) = self.environment {
-                    map.insert(
-                        "environment".into(),
-                        serde_json::Value::String(env.clone()),
-                    );
-                }
-                if let Some(ref svc) = self.service {
-                    map.insert("service".into(), serde_json::Value::String(svc.clone()));
-                }
-            }
         }
 
         /*

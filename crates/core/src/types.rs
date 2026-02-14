@@ -29,7 +29,7 @@ use serde::{Deserialize, Serialize};
  * `catcherType` identifies the SDK family — we use `"errors/rust"`.
  * `payload` carries the actual event data.
  */
-#[derive(Debug, Clone, Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HawkEvent {
     /// The raw base64-encoded integration token provided by the user.
@@ -49,15 +49,11 @@ pub struct HawkEvent {
 /**
  * Core event payload matching the backend's `EventData<Addons>` interface.
  *
- * Fields marked `Option` are serialized as `null` when `None` (via serde).
- * `skip_serializing_if` is used for truly optional fields that the backend
- * tolerates being absent.
- *
- * Key invariants (matching Node.js behaviour):
- * - `context` is a shallow merge of global context + per-event context.
- * - `catcher_version` is always present.
+ * MVP sends only `title`, `type`, `backtrace`, and `catcherVersion`.
+ * Fields like `release`, `user`, `context` are omitted for now and will
+ * be added in future iterations.
  */
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EventData {
     /// Human-readable title, e.g. `"Error: something broke"` or `"panic: index out of bounds"`.
@@ -73,18 +69,6 @@ pub struct EventData {
     /// `None` when no backtrace is available.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub backtrace: Option<Vec<BacktraceFrame>>,
-
-    /// Application release / version string set during `init()`.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub release: Option<String>,
-
-    /// The affected user at the time of the event.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub user: Option<User>,
-
-    /// Arbitrary key-value context. Shallow merge of global + per-event context.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub context: Option<serde_json::Value>,
 
     /// SDK version string, e.g. `"hawk-rust/0.1.0"`.
     pub catcher_version: String,
@@ -106,7 +90,7 @@ pub struct EventData {
  * The `sourceCode` field from the Node.js version is omitted in the MVP
  * because Rust binaries typically don't ship source alongside.
  */
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct BacktraceFrame {
     /// Source file path, if debug info is available.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -124,35 +108,6 @@ pub struct BacktraceFrame {
     #[serde(rename = "function")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub function: Option<String>,
-}
-
-// ---------------------------------------------------------------------------
-// User
-// ---------------------------------------------------------------------------
-
-/**
- * Represents the affected user at the time of the event.
- *
- * Matches the backend's `AffectedUser` interface.
- * All fields are optional except conceptually at least `id` should be set.
- */
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct User {
-    /// Internal application user identifier.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub id: Option<String>,
-
-    /// User's display name.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
-
-    /// URL to the user's profile / details page.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub url: Option<String>,
-
-    /// URL to the user's avatar / profile picture.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub image: Option<String>,
 }
 
 // ---------------------------------------------------------------------------

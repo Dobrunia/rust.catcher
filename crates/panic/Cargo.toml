@@ -8,4 +8,3 @@ description = "Panic hook integration for Hawk error tracking SDK"
 [dependencies]
 hawk_core = { path = "../core" }
 backtrace = "0.3"
-serde_json = "1"

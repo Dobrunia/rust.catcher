@@ -153,19 +153,18 @@ fn handle_panic(info: &PanicHookInfo) {
     let message = get_panic_message(info);
 
     /*
-     * Step 2: Extract source location (file, line, column).
+     * Step 2: Extract source location (file, line).
      *
      * `PanicInfo::location()` returns `Some(Location)` in most cases.
      * It can be `None` if the panic was invoked via `resume_unwind` or
      * in unusual no_std environments.
      */
-    let (file, line, column) = match info.location() {
+    let (file, line) = match info.location() {
         Some(loc) => (
             Some(loc.file().to_string()),
             Some(loc.line()),
-            Some(loc.column()),
         ),
-        None => (None, None, None),
+        None => (None, None),
     };
 
     /*
@@ -186,32 +185,20 @@ fn handle_panic(info: &PanicHookInfo) {
     let frames = convert_panic_backtrace(&bt);
 
     /*
-     * Step 5: Build the context object with panic-specific metadata.
-     * This extra info helps with debugging in the Hawk UI.
-     */
-    let mut context_map = serde_json::Map::new();
-    if let Some(ref f) = file {
-        context_map.insert("file".into(), serde_json::Value::String(f.clone()));
-    }
-    if let Some(l) = line {
-        context_map.insert("line".into(), serde_json::Value::Number(l.into()));
-    }
-    if let Some(c) = column {
-        context_map.insert("column".into(), serde_json::Value::Number(c.into()));
-    }
-    context_map.insert(
-        "thread".into(),
-        serde_json::Value::String(thread_name),
-    );
-
-    /*
-     * Step 6: Build the event title.
+     * Step 5: Build the event title.
+     *
      * Format: "panic: <message>" — matches the SPEC convention.
+     * We also append location and thread info directly into the title
+     * since the MVP has no `context` field yet.
      */
-    let title = format!("panic: {message}");
+    let location_str = match (&file, line) {
+        (Some(f), Some(l)) => format!(" at {f}:{l}"),
+        _ => String::new(),
+    };
+    let title = format!("panic: {message}{location_str} [thread: {thread_name}]");
 
     /*
-     * Step 7: Assemble the EventData and send it via hawk_core.
+     * Step 6: Assemble the EventData and send it via hawk_core.
      */
     let event = EventData {
         title,
@@ -221,9 +208,6 @@ fn handle_panic(info: &PanicHookInfo) {
         } else {
             Some(frames)
         },
-        release: None,     /* filled in by Client::send_event from options */
-        user: None,        /* filled in by Client::send_event from context */
-        context: Some(serde_json::Value::Object(context_map)),
         catcher_version: CATCHER_VERSION.to_string(),
     };
 
