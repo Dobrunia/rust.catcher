@@ -48,9 +48,6 @@ mod worker;
 // ---------------------------------------------------------------------------
 // Re-exports — the public surface area
 // ---------------------------------------------------------------------------
-
-use client::Options;
-use guard::Guard;
 pub use types::{BacktraceFrame, EventData, CATCHER_VERSION};
 
 // ---------------------------------------------------------------------------
@@ -84,9 +81,9 @@ pub use types::{BacktraceFrame, EventData, CATCHER_VERSION};
  * let _guard = hawk::init("eyJpbnRl...", Default::default())?;
  * ```
  */
-pub fn init(token: &str, options: Options) -> Result<Guard, String> {
+pub fn init(token: &str, options: client::Options) -> Result<guard::Guard, String> {
     client::Client::init(token, options)?;
-    Ok(Guard::new())
+    Ok(guard::Guard::new())
 }
 
 /**
