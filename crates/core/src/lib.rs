@@ -38,20 +38,20 @@
 // Module declarations
 // ---------------------------------------------------------------------------
 
-pub mod client;
-pub mod guard;
-pub mod token;
-pub mod transport;
-pub mod types;
-pub mod worker;
+mod client;
+mod guard;
+mod token;
+mod transport;
+mod types;
+mod worker;
 
 // ---------------------------------------------------------------------------
 // Re-exports — the public surface area
 // ---------------------------------------------------------------------------
 
-pub use client::Options;
-pub use guard::Guard;
-pub use types::{BacktraceFrame, BeforeSendResult, EventData, HawkEvent, CATCHER_VERSION};
+use client::Options;
+use guard::Guard;
+pub use types::{BacktraceFrame, EventData, CATCHER_VERSION};
 
 // ---------------------------------------------------------------------------
 // Public free functions
@@ -90,77 +90,37 @@ pub fn init(token: &str, options: Options) -> Result<Guard, String> {
 }
 
 /**
- * Sends an event with a user-defined title to Hawk.
+ * Sends an event to Hawk.
  *
- * This is the primary way to manually report errors or messages.
- * Analogous to `HawkCatcher.send(error)` in the Node.js SDK, but
- * takes a string title directly (since Rust errors don't have a
- * universal `.name` like JS).
+ * Accepts anything that implements `Display` — strings, errors, formatted
+ * messages. A backtrace is captured at the call site so the Hawk dashboard
+ * shows exactly where `hawk::send(...)` was called from.
  *
- * The `type` field is set to `"message"`.
+ * Analogous to `HawkCatcher.send(error)` in the Node.js SDK.
  *
  * If the SDK has not been initialized (no prior `init()` call), this
  * is a silent no-op.
  *
  * # Arguments
- * * `message` — The event title / error description.
+ * * `message` — Anything implementing `Display`: `&str`, `String`,
+ *   `&dyn Error`, `io::Error`, `anyhow::Error`, etc.
  *
- * # Example
+ * # Examples
  * ```ignore
- * hawk::send("Failed to connect to database");
  * hawk::send("User session expired");
- * ```
- */
-pub fn send(message: &str) {
-    if let Some(client) = client::get_client() {
-        let event = EventData {
-            title: message.to_string(),
-            event_type: Some("message".to_string()),
-            backtrace: None,
-            catcher_version: CATCHER_VERSION.to_string(),
-        };
-        client.send_event(event);
-    }
-}
-
-/**
- * Captures a Rust `dyn Error` and sends it as an event to Hawk.
  *
- * The error's `Display` output becomes the event title, and the error type
- * is set to `"error"`. A backtrace is captured at the point of this call
- * to help with debugging.
- *
- * If the SDK has not been initialized, this is a silent no-op.
- *
- * # Arguments
- * * `error` — Any type implementing `std::error::Error`.
- *
- * # Example
- * ```ignore
  * match std::fs::read_to_string("config.toml") {
  *     Ok(_) => {},
- *     Err(e) => hawk::capture_error(&e),
+ *     Err(e) => hawk::send(&e),
  * }
  * ```
  */
-pub fn capture_error(error: &dyn std::error::Error) {
+pub fn send(message: &impl std::fmt::Display) {
     if let Some(client) = client::get_client() {
-        /*
-         * Capture a backtrace at the call site.
-         * We use the `backtrace` crate to get structured frames, then
-         * convert them to our `BacktraceFrame` format.
-         */
-        let bt = backtrace::Backtrace::new();
-        let frames = convert_backtrace(&bt);
-
-        let event = EventData {
-            title: error.to_string(),
+        let event: EventData = EventData {
+            title: message.to_string(),
             event_type: Some("error".to_string()),
-            backtrace: if frames.is_empty() {
-                None
-            } else {
-                Some(frames)
-            },
+            backtrace: get_backtrace(),
             catcher_version: CATCHER_VERSION.to_string(),
         };
         client.send_event(event);
@@ -191,13 +151,28 @@ pub fn capture_event(event: EventData) {
 // ---------------------------------------------------------------------------
 
 /**
- * Converts a `backtrace::Backtrace` into a `Vec<BacktraceFrame>` suitable
- * for the Hawk event payload.
+ * Captures a backtrace at the current call site and converts it into
+ * a `Vec<BacktraceFrame>` suitable for the Hawk event payload.
  *
- * Iterates over resolved backtrace frames and extracts:
+ * Returns `None` if no useful frames were resolved (e.g. no debug info).
+ *
+ * Used by both `send()` and `capture_error()` to attach stack traces
+ * that point back to the exact location where the SDK function was called.
+ */
+pub fn get_backtrace() -> Option<Vec<BacktraceFrame>> {
+    let bt: backtrace::Backtrace = backtrace::Backtrace::new();
+    let frames: Vec<BacktraceFrame> = convert_backtrace(&bt);
+    if frames.is_empty() { None } else { Some(frames) }
+}
+
+/**
+ * Converts a `backtrace::Backtrace` into a `Vec<BacktraceFrame>`.
+ *
+ * Iterates over resolved frames and extracts:
  * - Function name (demangled symbol)
  * - File path
  * - Line number
+ * - Column number
  *
  * Filters out frames with no useful information (no file AND no function).
  *

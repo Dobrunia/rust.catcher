@@ -21,7 +21,7 @@ use crossbeam_channel::{Sender, TrySendError};
 use crate::token;
 use crate::transport::Transport;
 use crate::types::{
-    BeforeSendResult, EventData, HawkEvent, CATCHER_TYPE, CATCHER_VERSION,
+    BeforeSendResult, EventData, HawkEvent, CATCHER_TYPE,
 };
 use crate::worker::{FlushSignal, Worker, WorkerMsg};
 
@@ -177,7 +177,7 @@ impl Client {
          * Step 4: Create the transport (HTTP client) and spawn the worker.
          */
         let transport = Transport::new()?;
-        let _worker = Worker::spawn(receiver, endpoint, transport);
+        Worker::spawn(receiver, endpoint, transport);
 
         /*
          * Step 5: Store in the global singleton.
@@ -212,13 +212,6 @@ impl Client {
      * * `event` — The event data to send.
      */
     pub fn send_event(&self, mut event: EventData) {
-        /*
-         * Fill in the catcher version if the caller didn't set it.
-         */
-        if event.catcher_version.is_empty() {
-            event.catcher_version = CATCHER_VERSION.to_string();
-        }
-
         /*
          * Run the before_send callback if configured.
          * This lets the user filter sensitive data or drop events entirely.

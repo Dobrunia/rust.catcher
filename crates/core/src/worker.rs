@@ -26,7 +26,7 @@
  * are dropped), which happens when the `Client` is dropped.
  */
 use std::sync::{Arc, Condvar, Mutex};
-use std::thread::{self, JoinHandle};
+use std::thread;
 
 use crossbeam_channel::Receiver;
 
@@ -142,35 +142,29 @@ impl FlushSignal {
  * - `Event` → serialize + HTTP POST via `Transport`.
  * - `Flush` → signal the requester that all prior events are drained.
  */
-pub struct Worker {
-    /// Join handle for the background thread. Used during shutdown to
-    /// ensure the thread has exited cleanly.
-    handle: Option<JoinHandle<()>>,
-}
+pub struct Worker;
 
 impl Worker {
     /**
      * Spawns the background worker thread.
      *
+     * The thread runs until the channel disconnects (all senders dropped).
+     * It is fire-and-forget — no join handle is stored because the
+     * `Guard::drop()` → `flush()` path ensures all events are drained
+     * before the process exits.
+     *
      * # Arguments
      * * `receiver` — The receiving end of the bounded channel.
      * * `endpoint` — The collector URL to POST events to.
      * * `transport` — The HTTP transport used for sending.
-     *
-     * # Returns
-     * A `Worker` handle that can be used to join the thread on shutdown.
      */
-    pub fn spawn(receiver: Receiver<WorkerMsg>, endpoint: String, transport: Transport) -> Self {
-        let handle = thread::Builder::new()
+    pub fn spawn(receiver: Receiver<WorkerMsg>, endpoint: String, transport: Transport) {
+        thread::Builder::new()
             .name("hawk-worker".into())
             .spawn(move || {
                 Self::run_loop(&receiver, &endpoint, &transport);
             })
             .expect("[Hawk] Failed to spawn worker thread");
-
-        Self {
-            handle: Some(handle),
-        }
     }
 
     /**
@@ -215,15 +209,4 @@ impl Worker {
          */
     }
 
-    /**
-     * Joins the worker thread, blocking until it exits.
-     *
-     * Called during `Client` drop / shutdown. If the thread has already
-     * exited, this returns immediately.
-     */
-    pub fn join(&mut self) {
-        if let Some(handle) = self.handle.take() {
-            let _ = handle.join();
-        }
-    }
 }
