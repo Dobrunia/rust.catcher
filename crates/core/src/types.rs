@@ -63,8 +63,8 @@ pub struct EventData {
     /// Human-readable title, e.g. `"Error: something broke"` or `"panic: index out of bounds"`.
     pub title: String,
 
-    /// Severity / error type name. Maps to `Level` enum stringified.
-    /// Examples: `"error"`, `"fatal"`, `"info"`.
+    /// Error type name — equivalent to `error.name` in Node.js.
+    /// Examples: `"Error"`, `"TypeError"`, `"panic"`, `"message"`.
     #[serde(rename = "type")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub event_type: Option<String>,
@@ -156,48 +156,6 @@ pub struct User {
 }
 
 // ---------------------------------------------------------------------------
-// Level (severity)
-// ---------------------------------------------------------------------------
-
-/**
- * Severity level for events.
- *
- * Serialized as lowercase strings to match the backend's `type` field:
- * `"debug"`, `"info"`, `"warn"`, `"error"`, `"fatal"`.
- */
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Level {
-    Debug,
-    Info,
-    Warn,
-    Error,
-    Fatal,
-}
-
-impl Level {
-    /**
-     * Returns the string representation used in the backend protocol.
-     * E.g. `Level::Fatal` -> `"fatal"`.
-     */
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Level::Debug => "debug",
-            Level::Info => "info",
-            Level::Warn => "warn",
-            Level::Error => "error",
-            Level::Fatal => "fatal",
-        }
-    }
-}
-
-impl std::fmt::Display for Level {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-// ---------------------------------------------------------------------------
 // BeforeSendResult
 // ---------------------------------------------------------------------------
 
@@ -226,4 +184,5 @@ pub enum BeforeSendResult {
 pub const CATCHER_TYPE: &str = "errors/rust";
 
 /// SDK version string included in every event payload.
-pub const CATCHER_VERSION: &str = "hawk-rust/0.1.0";
+/// Derived at compile time from `Cargo.toml` [package] version.
+pub const CATCHER_VERSION: &str = concat!("hawk-rust/", env!("CARGO_PKG_VERSION"));

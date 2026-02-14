@@ -17,7 +17,7 @@
  *         ..Default::default()
  *     }).expect("Failed to init Hawk");
  *
- *     hawk::capture_message("Application started", hawk::Level::Info);
+ *     hawk::capture_message("Application started");
  *
  *     hawk::set_tag("region", "eu");
  *     hawk::set_extra("build", "release");
@@ -63,7 +63,7 @@ pub mod worker;
 pub use client::Options;
 pub use guard::Guard;
 pub use types::{
-    BacktraceFrame, BeforeSendResult, EventData, HawkEvent, Level, User,
+    BacktraceFrame, BeforeSendResult, EventData, HawkEvent, User,
     CATCHER_VERSION,
 };
 
@@ -109,24 +109,27 @@ pub fn init(token: &str, options: Options) -> Result<Guard, String> {
  * This is the simplest way to send a custom event. Useful for logging
  * significant application milestones (e.g. "Deployment complete").
  *
+ * The `type` field is set to `"message"` — matching the convention that
+ * `type` is the error class name (like `error.name` in Node.js), and
+ * for plain messages there is no error class.
+ *
  * If the SDK has not been initialized (no prior `init()` call), this
  * is a silent no-op.
  *
  * # Arguments
  * * `message` — The human-readable message to send as the event title.
- * * `level` — Severity level (`Level::Info`, `Level::Error`, etc.).
  *
  * # Example
  * ```ignore
- * hawk::capture_message("User logged in", hawk::Level::Info);
- * hawk::capture_message("Disk usage > 90%", hawk::Level::Warn);
+ * hawk::capture_message("User logged in");
+ * hawk::capture_message("Disk usage > 90%");
  * ```
  */
-pub fn capture_message(message: &str, level: Level) {
+pub fn capture_message(message: &str) {
     if let Some(client) = client::get_client() {
         let event = EventData {
             title: message.to_string(),
-            event_type: Some(level.as_str().to_string()),
+            event_type: Some("message".to_string()),
             backtrace: None,
             release: None,
             user: None,
