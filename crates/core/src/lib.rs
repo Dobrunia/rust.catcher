@@ -14,7 +14,7 @@
  *     let _guard = hawk::init("YOUR_BASE64_TOKEN", Default::default())
  *         .expect("Failed to init Hawk");
  *
- *     hawk::capture_message("Application started");
+ *     hawk::send("Application started");
  *
  *     // ... your application logic ...
  *
@@ -26,8 +26,8 @@
  *
  * - `init()` creates a global `Client` (stored in `OnceLock`) and spawns
  *   a background worker thread that drains events from a bounded channel.
- * - `capture_*` functions build an `EventData` and enqueue it on the
- *   channel (non-blocking).
+ * - `send()` / `capture_error()` build an `EventData` and enqueue it on
+ *   the channel (non-blocking).
  * - The worker POSTs each event as a `HawkEvent` envelope to the Hawk
  *   collector via `reqwest` (blocking HTTP in the dedicated thread).
  * - `Guard::drop()` calls `flush()` to ensure pending events are delivered
@@ -51,23 +51,20 @@ pub mod worker;
 
 pub use client::Options;
 pub use guard::Guard;
-pub use types::{
-    BacktraceFrame, BeforeSendResult, EventData, HawkEvent,
-    CATCHER_VERSION,
-};
+pub use types::{BacktraceFrame, BeforeSendResult, EventData, HawkEvent, CATCHER_VERSION};
 
 // ---------------------------------------------------------------------------
 // Public free functions
 // ---------------------------------------------------------------------------
 
 /**
- * Initializes the Hawk SDK with the given integration token and options.
+ * Initializes the Hawk SDK with the given integration token.
  *
  * This function MUST be called exactly once, typically at the very beginning
  * of `main()`. It:
  *
  * 1. Decodes and validates the integration token.
- * 2. Resolves the collector endpoint (custom or default).
+ * 2. Derives the collector endpoint from the token.
  * 3. Creates a bounded event channel and spawns the background worker.
  * 4. Stores the `Client` in a process-wide `OnceLock`.
  * 5. Returns a `Guard` that flushes pending events when dropped.
@@ -76,7 +73,7 @@ pub use types::{
  * * `token` — The base64-encoded integration token from the Hawk project
  *   settings page.
  * * `options` — SDK configuration. Use `Default::default()` for sensible
- *   defaults.
+ *   defaults, or configure `before_send` to filter / modify events.
  *
  * # Returns
  * * `Ok(Guard)` — Hold this value alive for the duration of your app.
@@ -84,7 +81,7 @@ pub use types::{
  *
  * # Example
  * ```ignore
- * let _guard = hawk_core::init("eyJpbnRl...", Default::default())?;
+ * let _guard = hawk::init("eyJpbnRl...", Default::default())?;
  * ```
  */
 pub fn init(token: &str, options: Options) -> Result<Guard, String> {
@@ -93,28 +90,28 @@ pub fn init(token: &str, options: Options) -> Result<Guard, String> {
 }
 
 /**
- * Captures a text message and sends it as an event to Hawk.
+ * Sends an event with a user-defined title to Hawk.
  *
- * This is the simplest way to send a custom event. Useful for logging
- * significant application milestones (e.g. "Deployment complete").
+ * This is the primary way to manually report errors or messages.
+ * Analogous to `HawkCatcher.send(error)` in the Node.js SDK, but
+ * takes a string title directly (since Rust errors don't have a
+ * universal `.name` like JS).
  *
- * The `type` field is set to `"message"` — matching the convention that
- * `type` is the error class name (like `error.name` in Node.js), and
- * for plain messages there is no error class.
+ * The `type` field is set to `"message"`.
  *
  * If the SDK has not been initialized (no prior `init()` call), this
  * is a silent no-op.
  *
  * # Arguments
- * * `message` — The human-readable message to send as the event title.
+ * * `message` — The event title / error description.
  *
  * # Example
  * ```ignore
- * hawk::capture_message("User logged in");
- * hawk::capture_message("Disk usage > 90%");
+ * hawk::send("Failed to connect to database");
+ * hawk::send("User session expired");
  * ```
  */
-pub fn capture_message(message: &str) {
+pub fn send(message: &str) {
     if let Some(client) = client::get_client() {
         let event = EventData {
             title: message.to_string(),
@@ -173,11 +170,9 @@ pub fn capture_error(error: &dyn std::error::Error) {
 /**
  * Sends a pre-built `EventData` directly to Hawk.
  *
- * This is the low-level internal API used by `hawk_panic` to send
- * panic events with custom backtrace and context.
- *
- * Also available for advanced users who want full control over the
- * event payload.
+ * This is the low-level API used by `hawk_panic` to send panic events
+ * with custom backtrace data. Also available for advanced users who want
+ * full control over the event payload.
  *
  * If the SDK has not been initialized, this is a silent no-op.
  *
@@ -188,28 +183,6 @@ pub fn capture_error(error: &dyn std::error::Error) {
 pub fn capture_event(event: EventData) {
     if let Some(client) = client::get_client() {
         client.send_event(event);
-    }
-}
-
-/**
- * Manually triggers a flush of all pending events.
- *
- * Blocks the calling thread until the background worker has drained
- * the queue or the configured timeout elapses.
- *
- * Normally you don't need to call this — the `Guard` handles it
- * automatically on drop. Use this if you need to ensure delivery
- * at a specific point in your code.
- *
- * # Returns
- * `true` if all pending events were sent within the timeout,
- * `false` if the timeout expired.
- */
-pub fn flush() -> bool {
-    if let Some(client) = client::get_client() {
-        client.flush()
-    } else {
-        true
     }
 }
 

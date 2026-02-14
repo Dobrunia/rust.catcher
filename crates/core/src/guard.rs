@@ -67,7 +67,7 @@ impl Drop for Guard {
      */
     fn drop(&mut self) {
         if let Some(client) = client::get_client() {
-            let flushed = client.flush();
+            let flushed: bool = client.flush();
             if !flushed {
                 eprintln!("[Hawk] Flush timed out — some events may not have been sent");
             }

@@ -115,13 +115,11 @@ pub struct BacktraceFrame {
 // ---------------------------------------------------------------------------
 
 /**
- * Return type for the `before_send` callback.
+ * Return type for the `before_send` callback passed in `Options`.
  *
  * Allows the user to:
  * - `Drop` — silently discard the event (it will NOT be sent).
  * - `Send(EventData)` — send a potentially modified event.
- *
- * If the callback is not set, the event is sent as-is.
  */
 pub enum BeforeSendResult {
     /// Discard the event entirely — do not send it.

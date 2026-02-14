@@ -3,9 +3,10 @@
  * background worker, and transport.
  *
  * Lifecycle:
- * 1. User calls `hawk::init(token, options)` → creates a `Client` and
- *    stores it in a global `OnceLock`.
- * 2. All `hawk::capture_*` calls read the global `Client`.
+ * 1. User calls `hawk::init(token)` → creates a `Client` and stores it
+ *    in a global `OnceLock`.
+ * 2. `hawk::send()` / `hawk::capture_error()` read the global `Client`
+ *    and enqueue events.
  * 3. `hawk::init` returns a `Guard`; when the guard is dropped, it calls
  *    `Client::flush()` to drain pending events before the process exits.
  *
@@ -32,7 +33,7 @@ use crate::worker::{FlushSignal, Worker, WorkerMsg};
  * Process-wide singleton holding the initialized `Client`.
  *
  * `OnceLock` ensures that `init()` can only succeed once — subsequent calls
- * are no-ops. All public free functions (`capture_message`, etc.)
+ * return an error. All public free functions (`send`, `capture_error`, etc.)
  * access this global via `get_client()`.
  */
 static GLOBAL_CLIENT: OnceLock<Client> = OnceLock::new();
@@ -57,28 +58,17 @@ pub fn get_client() -> Option<&'static Client> {
  *
  * # Example
  * ```ignore
+ * use std::sync::Arc;
+ *
  * hawk::init("BASE64_TOKEN", hawk::Options {
- *     queue_capacity: 200,
+ *     before_send: Some(Arc::new(|event| {
+ *         hawk::BeforeSendResult::Send(event)
+ *     })),
  *     ..Default::default()
  * });
  * ```
  */
 pub struct Options {
-    /// Custom collector endpoint URL. If `None`, the SDK derives the
-    /// endpoint from the integration token:
-    /// `https://{integrationId}.k1.hawk.so/`
-    pub collector_endpoint: Option<String>,
-
-    /// Bounded channel capacity. When the queue is full, new events are
-    /// dropped silently (back-pressure).
-    /// Default: `100`.
-    pub queue_capacity: usize,
-
-    /// Maximum time (in milliseconds) that `flush()` will block waiting
-    /// for the worker to drain pending events.
-    /// Default: `2000` (2 seconds).
-    pub flush_timeout_ms: u64,
-
     /// Optional callback invoked before each event is sent.
     ///
     /// Allows the user to:
@@ -92,13 +82,22 @@ pub struct Options {
 impl Default for Options {
     fn default() -> Self {
         Self {
-            collector_endpoint: None,
-            queue_capacity: 100,
-            flush_timeout_ms: 2000,
             before_send: None,
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Internal constants
+// ---------------------------------------------------------------------------
+
+/// Bounded channel capacity — internal implementation detail.
+/// When full, new events are silently dropped (back-pressure).
+const QUEUE_CAPACITY: usize = 100;
+
+/// Maximum time that `flush()` will block waiting for the worker
+/// to drain pending events before giving up.
+const FLUSH_TIMEOUT: Duration = Duration::from_secs(2);
 
 // ---------------------------------------------------------------------------
 // Client
@@ -110,7 +109,6 @@ impl Default for Options {
  * Owns:
  * - The raw token string (passed through in every envelope).
  * - The bounded channel sender (events are enqueued here).
- * - Snapshot of `Options` fields needed at send-time.
  */
 pub struct Client {
     /// Raw base64-encoded integration token — included in every `HawkEvent`.
@@ -121,9 +119,6 @@ pub struct Client {
 
     /// Optional before_send callback.
     before_send: Option<Arc<dyn Fn(EventData) -> BeforeSendResult + Send + Sync>>,
-
-    /// Flush timeout duration.
-    flush_timeout: Duration,
 }
 
 /**
@@ -144,14 +139,14 @@ impl Client {
      *
      * # Steps
      * 1. Decode the integration token to extract `integrationId`.
-     * 2. Resolve the collector endpoint (custom or default).
+     * 2. Derive the collector endpoint from the integration ID.
      * 3. Create the bounded channel.
      * 4. Build and spawn the transport + worker.
      * 5. Store the client in `GLOBAL_CLIENT`.
      *
      * # Arguments
-     * * `token` — The raw base64-encoded integration token.
-     * * `options` — SDK configuration options.
+     * * `token_str` — The raw base64-encoded integration token.
+     * * `options` — SDK configuration (use `Default::default()` for defaults).
      *
      * # Returns
      * `Ok(())` on success, `Err(String)` if the token is invalid or the
@@ -165,14 +160,10 @@ impl Client {
         let decoded = token::decode_token(token_str)?;
 
         /*
-         * Step 2: Resolve the collector endpoint.
-         * If the user provided a custom endpoint, use it; otherwise derive
-         * from the integration ID — matching Node.js catcher behaviour.
+         * Step 2: Derive the collector endpoint from the integration ID.
+         * Format: https://{integrationId}.k1.hawk.so/
          */
-        let endpoint = options
-            .collector_endpoint
-            .clone()
-            .unwrap_or_else(|| token::default_endpoint(&decoded.integration_id));
+        let endpoint = token::default_endpoint(&decoded.integration_id);
 
         /*
          * Step 3: Create the bounded channel.
@@ -180,7 +171,7 @@ impl Client {
          * is full, causing events to be dropped — which is the intended
          * back-pressure behaviour.
          */
-        let (sender, receiver) = crossbeam_channel::bounded(options.queue_capacity);
+        let (sender, receiver) = crossbeam_channel::bounded(QUEUE_CAPACITY);
 
         /*
          * Step 4: Create the transport (HTTP client) and spawn the worker.
@@ -189,19 +180,15 @@ impl Client {
         let _worker = Worker::spawn(receiver, endpoint, transport);
 
         /*
-         * Build the client with snapshots of relevant options.
+         * Step 5: Store in the global singleton.
+         * `set()` returns `Err(value)` if already initialized.
          */
         let client = Client {
             token: token_str.to_string(),
             sender,
             before_send: options.before_send,
-            flush_timeout: Duration::from_millis(options.flush_timeout_ms),
         };
 
-        /*
-         * Step 5: Store in the global singleton.
-         * `set()` returns `Err(value)` if already initialized.
-         */
         GLOBAL_CLIENT
             .set(client)
             .map_err(|_| "Hawk SDK is already initialized".to_string())?;
@@ -212,7 +199,7 @@ impl Client {
     /**
      * Enqueues a fully built `EventData` for delivery.
      *
-     * This is the internal "send" path used by all public `capture_*` functions.
+     * This is the internal "send" path used by all public functions.
      * It:
      * 1. Fills in `catcher_version` if empty.
      * 2. Runs the `before_send` callback if configured.
@@ -269,10 +256,10 @@ impl Client {
 
     /**
      * Flushes all pending events, blocking until the worker has drained
-     * the queue or the configured timeout elapses.
+     * the queue or the timeout elapses (2 seconds).
      *
-     * This is called automatically by `Guard::drop()` to ensure events
-     * are delivered before the process exits.
+     * Called automatically by `Guard::drop()` to ensure events are
+     * delivered before the process exits.
      *
      * # Returns
      * `true` if the flush completed within the timeout, `false` otherwise.
@@ -286,7 +273,7 @@ impl Client {
          * Event messages will have been sent.
          */
         match self.sender.try_send(WorkerMsg::Flush(signal.clone())) {
-            Ok(()) => signal.wait_timeout(self.flush_timeout),
+            Ok(()) => signal.wait_timeout(FLUSH_TIMEOUT),
             Err(_) => false,
         }
     }
