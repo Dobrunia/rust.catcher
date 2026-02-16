@@ -29,7 +29,7 @@ mod transport;
 pub use client::Options;
 pub use guard::Guard;
 pub use protocol::constants::{CATCHER_TYPE, CATCHER_VERSION};
-pub use protocol::types::{BacktraceFrame, BeforeSendResult, EventData, HawkEvent};
+pub use protocol::types::{BacktraceFrame, EventData, HawkEvent};
 
 // ---------------------------------------------------------------------------
 // Public functions

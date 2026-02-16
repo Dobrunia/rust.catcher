@@ -20,7 +20,7 @@ use crossbeam_channel::{Sender, TrySendError};
 
 use crate::protocol::constants::CATCHER_TYPE;
 use crate::protocol::token;
-use crate::protocol::types::{BeforeSendResult, EventData, HawkEvent};
+use crate::protocol::types::{EventData, HawkEvent};
 use crate::transport::{FlushSignal, Transport, Worker, WorkerMsg};
 
 // ---------------------------------------------------------------------------
@@ -59,8 +59,9 @@ pub fn get_client() -> Option<&'static Client> {
  * use std::sync::Arc;
  *
  * hawk::init("BASE64_TOKEN", hawk::Options {
- *     before_send: Some(Arc::new(|event| {
- *         hawk::BeforeSendResult::Send(event)
+ *     before_send: Some(Arc::new(|mut event| {
+ *         event.title = format!("[filtered] {}", event.title);
+ *         Some(event) // return modified event, or None to drop
  *     })),
  *     ..Default::default()
  * });
@@ -69,12 +70,15 @@ pub fn get_client() -> Option<&'static Client> {
 pub struct Options {
     /// Optional callback invoked before each event is sent.
     ///
-    /// Allows the user to:
-    /// - Inspect / modify the event (`BeforeSendResult::Send(modified)`)
-    /// - Drop the event entirely (`BeforeSendResult::Drop`)
+    /// Receives a clone of the event. Return value:
+    /// - `None` → drop the event (it will NOT be sent)
+    /// - `Some(event)` → send this (possibly modified) event
+    ///
+    /// If the callback panics, the original event is sent unchanged
+    /// and a warning is printed to stderr.
     ///
     /// If not set, events are sent as-is.
-    pub before_send: Option<Arc<dyn Fn(EventData) -> BeforeSendResult + Send + Sync>>,
+    pub before_send: Option<Arc<dyn Fn(EventData) -> Option<EventData> + Send + Sync>>,
 }
 
 impl Default for Options {
@@ -116,7 +120,7 @@ pub struct Client {
     sender: Sender<WorkerMsg>,
 
     /// Optional before_send callback.
-    before_send: Option<Arc<dyn Fn(EventData) -> BeforeSendResult + Send + Sync>>,
+    before_send: Option<Arc<dyn Fn(EventData) -> Option<EventData> + Send + Sync>>,
 }
 
 /**
@@ -212,12 +216,28 @@ impl Client {
     pub fn send_event(&self, mut event: EventData) {
         /*
          * Run the before_send callback if configured.
-         * This lets the user filter sensitive data or drop events entirely.
+         *
+         * Mirrors the Node.js catcher behaviour:
+         * - Callback receives a clone of the event (original stays intact).
+         * - Returns None  → drop the event.
+         * - Returns Some(modified) → send the modified event.
+         * - Panics → send the original event unchanged, print a warning.
          */
         if let Some(ref callback) = self.before_send {
-            match callback(event) {
-                BeforeSendResult::Drop => return,
-                BeforeSendResult::Send(modified) => event = modified,
+            let original = event.clone();
+
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                callback(original)
+            }));
+
+            match result {
+                Ok(None) => return,
+                Ok(Some(modified)) => event = modified,
+                Err(_) => {
+                    eprintln!(
+                        "[Hawk] before_send panicked — sending original event unchanged"
+                    );
+                }
             }
         }
 

@@ -5,18 +5,37 @@
  * from your Hawk project settings, then run:
  *
  *   cargo run -p hawk_example
+ *   cargo run -p hawk_example -- --panic        # test panic capture
+ *   cargo run -p hawk_example -- --before-send  # test before_send filter
  */
+use std::sync::Arc;
 
 /// Paste your integration token here.
-const TOKEN: &str = "eyJpbnRlZ3JhdGlvbklkIjoiOTU3MmQyOWQtNWJhZS00YmYyLTkwN2MtZDk5ZDg5MGIwOTVmIiwic2VjcmV0IjoiZTExODFiZWItMjdlMS00ZDViLWEwZmEtZmUwYTM1Mzg5OWMyIn0=";
+const TOKEN: &str = "PASTE_YOUR_TOKEN_HERE";
 
 fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    let test_panic = args.iter().any(|a| a == "--panic");
+    let test_before_send = args.iter().any(|a| a == "--before-send");
+
     /*
-     * Initialize the SDK — just the token, everything else is defaults.
-     * Panic hook is installed automatically (catch_panics = true).
-     * Returns a Guard that flushes pending events on drop.
+     * Initialize the SDK.
+     * If --before-send is passed, attach a callback that prefixes every title.
      */
-    let _guard = hawk::init(TOKEN);
+    let _guard = if test_before_send {
+        println!("[example] Initializing with before_send filter");
+        hawk::init(hawk::Options {
+            token: TOKEN.into(),
+            before_send: Some(Arc::new(|mut event| {
+                event.title = format!("[filtered] {}", event.title);
+                println!("[before_send] Modified title → {}", event.title);
+                Some(event) // None here would drop the event
+            })),
+            ..Default::default()
+        })
+    } else {
+        hawk::init(TOKEN)
+    };
 
     /*
      * Send a plain text message.
@@ -36,9 +55,14 @@ fn main() {
     }
 
     /*
-     * Uncomment to test panic capture:
+     * Test panic capture if requested.
+     * The panic hook (catch_panics = true by default) will intercept this
+     * and send it to Hawk before the process aborts.
      */
-    // panic!("Test panic from Hawk example");
+    if test_panic {
+        println!("[example] Triggering a panic...");
+        panic!("Test panic from Hawk example");
+    }
 
     println!("[example] Done. Events will be flushed when _guard drops.");
 }

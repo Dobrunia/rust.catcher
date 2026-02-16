@@ -28,7 +28,7 @@
  *         catch_panics: false,
  *         before_send: Some(Arc::new(|mut event| {
  *             event.title = format!("[filtered] {}", event.title);
- *             hawk::BeforeSendResult::Send(event)
+ *             Some(event) // None to drop
  *         })),
  *     });
  *
@@ -44,7 +44,7 @@ use std::sync::Arc;
 // ---------------------------------------------------------------------------
 
 pub use hawk_core::{
-    BacktraceFrame, BeforeSendResult, EventData, Guard, HawkEvent, CATCHER_VERSION,
+    BacktraceFrame, EventData, Guard, HawkEvent, CATCHER_VERSION,
     send, capture_event, flush, get_backtrace, convert_backtrace,
 };
 
@@ -69,9 +69,13 @@ pub struct Options {
     pub catch_panics: bool,
 
     /// Optional callback invoked before each event is sent.
-    /// Return `BeforeSendResult::Send(event)` to send (possibly modified),
-    /// or `BeforeSendResult::Drop` to discard the event.
-    pub before_send: Option<Arc<dyn Fn(EventData) -> BeforeSendResult + Send + Sync>>,
+    ///
+    /// Receives a clone of the event. Return value:
+    /// - `None` → drop the event
+    /// - `Some(event)` → send this (possibly modified) event
+    ///
+    /// If the callback panics, the original event is sent unchanged.
+    pub before_send: Option<Arc<dyn Fn(EventData) -> Option<EventData> + Send + Sync>>,
 }
 
 impl Default for Options {
@@ -107,20 +111,19 @@ impl From<&str> for Options {
  * Accepts either a bare token string or a full `Options` struct:
  *
  * ```ignore
- * // Simple — just a token (panics caught by default)
+ * // Simple
  * let _guard = hawk::init("TOKEN");
  *
  * // Full control
  * let _guard = hawk::init(hawk::Options {
  *     token: "TOKEN".into(),
  *     catch_panics: false,
- *     before_send: Some(Arc::new(|e| hawk::BeforeSendResult::Send(e))),
+ *     before_send: Some(Arc::new(|e| Some(e))),
  * });
  * ```
  *
  * # Panics
  * Panics if the token is malformed or `init` is called more than once.
- * These are configuration bugs that should be caught at startup.
  *
  * # Returns
  * A `Guard` — keep it alive for the duration of your app.
