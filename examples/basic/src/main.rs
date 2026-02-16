@@ -8,7 +8,7 @@
  */
 
 /// Paste your integration token here.
-const TOKEN: &str = "PASTE_YOUR_TOKEN_HERE";
+const TOKEN: &str = "eyJpbnRlZ3JhdGlvbklkIjoiOTU3MmQyOWQtNWJhZS00YmYyLTkwN2MtZDk5ZDg5MGIwOTVmIiwic2VjcmV0IjoiZTExODFiZWItMjdlMS00ZDViLWEwZmEtZmUwYTM1Mzg5OWMyIn0=";
 
 fn main() {
     /*
