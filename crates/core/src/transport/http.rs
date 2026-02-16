@@ -17,7 +17,7 @@
  * - **No `Authorization` header** — the Node.js catcher sends the token
  *   inside the JSON body, not as a header. We match that behaviour exactly.
  */
-use crate::types::HawkEvent;
+use crate::protocol::types::HawkEvent;
 
 // ---------------------------------------------------------------------------
 // Transport
@@ -75,22 +75,11 @@ impl Transport {
      * host application.
      */
     pub fn send(&self, endpoint: &str, event: &HawkEvent) {
-        /*
-         * Attempt the POST request. We use `.json(event)` which handles
-         * serialization and sets the Content-Type header automatically.
-         *
-         * This mirrors the Node.js catcher's:
-         *   axios.post(this.collectorEndpoint, eventFormatted)
-         */
         let result = self.http
             .post(endpoint)
             .json(event)
             .send();
 
-        /*
-         * Best-effort: log failures to stderr but never propagate them.
-         * This matches the Node.js catcher's `.catch(err => console.error(...))`.
-         */
         match result {
             Ok(response) => {
                 if !response.status().is_success() {

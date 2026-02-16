@@ -129,13 +129,3 @@ pub enum BeforeSendResult {
     Send(EventData),
 }
 
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-/// The catcher type identifier sent in every `HawkEvent` envelope."errors/rust"
-pub const CATCHER_TYPE: &str = "errors/nodejs";
-
-/// SDK version string included in every event payload.
-/// Derived at compile time from `Cargo.toml` [package] version.
-pub const CATCHER_VERSION: &str = concat!("hawk-rust/", env!("CARGO_PKG_VERSION"));

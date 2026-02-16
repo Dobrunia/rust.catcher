@@ -5,27 +5,22 @@
  * End users should depend on the `hawk` facade crate instead, which
  * re-exports everything and wires up addons (panic hook, etc.).
  *
- * # Architecture
+ * # Module structure
  *
- * - `init()` creates a global `Client` (stored in `OnceLock`) and spawns
- *   a background worker thread that drains events from a bounded channel.
- * - `send()` builds an `EventData` and enqueues it (non-blocking).
- * - The worker POSTs each event as a `HawkEvent` envelope to the Hawk
- *   collector via `reqwest` (blocking HTTP in the dedicated thread).
- * - `Guard::drop()` calls `flush()` to ensure pending events are delivered
- *   before the process exits.
+ * - `protocol/` — what we send: types, constants, token handling
+ * - `transport/` — how we deliver: HTTP client, background worker
+ * - `client` — SDK lifecycle: init, global state, event routing
+ * - `guard` — RAII flush-on-drop
  */
 
 // ---------------------------------------------------------------------------
-// Module declarations (all private — public surface is re-exports only)
+// Modules
 // ---------------------------------------------------------------------------
 
 mod client;
 mod guard;
-mod token;
+mod protocol;
 mod transport;
-mod types;
-mod worker;
 
 // ---------------------------------------------------------------------------
 // Re-exports
@@ -33,7 +28,8 @@ mod worker;
 
 pub use client::Options;
 pub use guard::Guard;
-pub use types::{BacktraceFrame, BeforeSendResult, EventData, HawkEvent, CATCHER_VERSION};
+pub use protocol::constants::{CATCHER_TYPE, CATCHER_VERSION};
+pub use protocol::types::{BacktraceFrame, BeforeSendResult, EventData, HawkEvent};
 
 // ---------------------------------------------------------------------------
 // Public functions

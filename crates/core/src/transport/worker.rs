@@ -30,8 +30,8 @@ use std::thread;
 
 use crossbeam_channel::Receiver;
 
-use crate::transport::Transport;
-use crate::types::HawkEvent;
+use super::http::Transport;
+use crate::protocol::types::HawkEvent;
 
 // ---------------------------------------------------------------------------
 // WorkerMsg — the messages sent through the bounded channel
@@ -112,17 +112,13 @@ impl FlushSignal {
      */
     pub fn wait_timeout(&self, timeout: std::time::Duration) -> bool {
         if let Ok(guard) = self.mutex.lock() {
-            /*
-             * Loop to handle spurious wakeups — standard condvar pattern.
-             * The `wait_timeout` on the condvar returns a `(guard, WaitTimeoutResult)`.
-             */
             let result = self
                 .condvar
                 .wait_timeout_while(guard, timeout, |done| !*done);
 
             match result {
                 Ok((_, timeout_result)) => !timeout_result.timed_out(),
-                Err(_) => false, /* poisoned mutex — treat as timeout */
+                Err(_) => false,
             }
         } else {
             false
@@ -173,40 +169,17 @@ impl Worker {
      * Blocks on `receiver.recv()` waiting for the next message.
      * When the channel disconnects (all senders dropped), `recv()` returns
      * `Err(RecvError)` and the loop exits cleanly.
-     *
-     * # Arguments
-     * * `receiver` — The bounded channel receiver.
-     * * `endpoint` — The collector URL.
-     * * `transport` — The HTTP transport.
      */
     fn run_loop(receiver: &Receiver<WorkerMsg>, endpoint: &str, transport: &Transport) {
-        /*
-         * Block on each incoming message. The loop exits when all senders
-         * have been dropped and the channel is empty.
-         */
         while let Ok(msg) = receiver.recv() {
             match msg {
                 WorkerMsg::Event(event) => {
-                    /*
-                     * Send the event via HTTP. This is best-effort:
-                     * Transport::send() logs errors internally and never panics.
-                     */
                     transport.send(endpoint, &event);
                 }
                 WorkerMsg::Flush(signal) => {
-                    /*
-                     * All messages before this Flush have already been processed
-                     * (channel is FIFO). Notify the waiter that flush is complete.
-                     */
                     signal.notify();
                 }
             }
         }
-
-        /*
-         * Channel disconnected — all senders dropped. Worker exits cleanly.
-         * This is the normal shutdown path triggered by Guard::drop().
-         */
     }
-
 }

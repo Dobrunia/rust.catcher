@@ -18,12 +18,10 @@ use std::time::Duration;
 
 use crossbeam_channel::{Sender, TrySendError};
 
-use crate::token;
-use crate::transport::Transport;
-use crate::types::{
-    BeforeSendResult, EventData, HawkEvent, CATCHER_TYPE,
-};
-use crate::worker::{FlushSignal, Worker, WorkerMsg};
+use crate::protocol::constants::CATCHER_TYPE;
+use crate::protocol::token;
+use crate::protocol::types::{BeforeSendResult, EventData, HawkEvent};
+use crate::transport::{FlushSignal, Transport, Worker, WorkerMsg};
 
 // ---------------------------------------------------------------------------
 // Global singleton
