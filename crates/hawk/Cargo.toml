@@ -1,0 +1,10 @@
+[package]
+name = "hawk"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Hawk error tracking SDK for Rust"
+
+[dependencies]
+hawk_core = { path = "../core" }
+hawk_panic = { path = "../panic" }
