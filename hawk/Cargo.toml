@@ -6,5 +6,5 @@ license.workspace = true
 description = "Hawk error tracking SDK for Rust"
 
 [dependencies]
-hawk_core = { path = "../core" }
-hawk_panic = { path = "../panic" }
+hawk_core = { path = "../hawk_core" }
+hawk_panic = { path = "../hawk_panic" }

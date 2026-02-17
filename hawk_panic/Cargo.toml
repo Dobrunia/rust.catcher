@@ -6,5 +6,5 @@ license.workspace = true
 description = "Panic hook integration for Hawk error tracking SDK"
 
 [dependencies]
-hawk_core = { path = "../core" }
+hawk_core = { path = "../hawk_core" }
 backtrace = "0.3"
