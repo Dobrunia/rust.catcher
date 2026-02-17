@@ -1,24 +1,31 @@
-crates/core   → hawk_core  (движок: транспорт, очередь, воркер)
-crates/panic  → hawk_panic (аддон: перехват паник)
-crates/hawk   → hawk       (фасад: собирает всё, юзер импортит только его)
+# hawk.rust
 
- How to create a Catcher
-Introduction
+Hawk error tracking SDK for Rust.
 
-If you read this page then you want to create your own catcher module for the language we do not support yet or any other custom system.
-Feature requirements
+```
+hawk.rust/
+├── hawk_core/      # engine: transport, queue, worker
+├── hawk_panic/     # addon: panic hook
+├── hawk/           # facade: user-facing API
+├── examples/basic/ # usage example
+└── Cargo.toml      # workspace
+```
 
-This document contains the list of features that should be supported by every catcher
+## Feature checklist
 
-    Bind global error handler
-    Send caught errors to the hawk using universal Event Format
-    Collect and send code fragments for each line of Stacktrace
-    Allow to send events to the Hawk manually 
-    Allow users to specify free-format context object with any data. Context can be specified globally (on initialization) and with every manually sent event. If both present, they should be merged.
-    Allow passing user object with a currently authenticated user, see Event Format. When user is not specified, the catcher should generate user with {id: 'user-unique token'} so Hawk can calculate Affected Users count.
-    The catcher can pass language-specific data through the addons field
-    If possible, runtime variables values should be extracted from the Stacktrace and passed to the Hawk.
-    Send own version with event. Needed for source maps and suspected commits.
-    If Catcher works on the backend side, it can send Suspected Commits using git.
-    If possible, the Catcher should send error levels (Fatal, Warning, etc)
-    If possible, the Catcher should have an interface for integration with popular loggers. For example, Monolog for PHP.
+Based on the [Hawk Catcher specification](https://docs.hawk.so).
+
+| # | Feature | Status | Notes |
+|---|---------|--------|-------|
+| 1 | Bind global error handler | ✅ | `hawk_panic` — auto-installed via `catch_panics` option |
+| 2 | Send errors using universal Event Format | ✅ | `HawkEvent { token, catcherType, payload }` |
+| 3 | Collect and send code fragments for Stacktrace | ❌ | Rust binaries don't ship source; needs debug info / source map support |
+| 4 | Allow to send events manually | ✅ | `hawk::send(msg)`, `hawk::capture_event(event)` |
+| 5 | Free-format context object (global + per-event, merged) | ❌ | Planned for next iteration |
+| 6 | User object (authenticated user / generated ID) | ❌ | Planned for next iteration |
+| 7 | Language-specific addons field | ❌ | Planned |
+| 8 | Extract runtime variable values from Stacktrace | ❌ | Limited in compiled languages without a debugger |
+| 9 | Send own version with event | ✅ | `catcherVersion: "hawk-rust/0.1.0"` via `CARGO_PKG_VERSION` |
+| 10 | Suspected Commits via git | ❌ | Planned |
+| 11 | Error levels (Fatal, Warning, etc.) | ❌ | `type` field exists but levels not formalized yet |
+| 12 | Integration with popular loggers | ❌ | `tracing` / `log` crate integration planned |
