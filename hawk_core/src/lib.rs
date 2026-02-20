@@ -1,4 +1,4 @@
-/**
+/*!
  * Hawk Core — the internal SDK engine.
  *
  * This crate provides the transport, event queue, and worker thread.
@@ -12,10 +12,6 @@
  * - `client` — SDK lifecycle: init, global state, event routing
  * - `guard` — RAII flush-on-drop
  */
-
-// ---------------------------------------------------------------------------
-// Modules
-// ---------------------------------------------------------------------------
 
 mod client;
 mod guard;

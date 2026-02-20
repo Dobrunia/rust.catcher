@@ -3,8 +3,9 @@ name = "hawk"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+rust-version.workspace = true
 description = "Hawk error tracking SDK for Rust"
 
 [dependencies]
-hawk_core = { path = "../hawk_core" }
-hawk_panic = { path = "../hawk_panic" }
+hawk_core.workspace = true
+hawk_panic.workspace = true

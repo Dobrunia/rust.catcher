@@ -7,7 +7,7 @@
  * The outermost envelope is `HawkEvent`, which wraps an `EventData` payload.
  * The backend receives: { token, catcherType, payload: EventData }.
  */
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 // ---------------------------------------------------------------------------
 // Envelope — the top-level structure POSTed to the collector
@@ -29,7 +29,7 @@ use serde::{Deserialize, Serialize};
  * `catcherType` identifies the SDK family — we use `"errors/rust"`.
  * `payload` carries the actual event data.
  */
-#[derive(Clone, Serialize)]
+#[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HawkEvent {
     /// The raw base64-encoded integration token provided by the user.
@@ -53,7 +53,7 @@ pub struct HawkEvent {
  * Fields like `release`, `user`, `context` are omitted for now and will
  * be added in future iterations.
  */
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EventData {
     /// Human-readable title, e.g. `"Error: something broke"` or `"panic: index out of bounds"`.
@@ -90,7 +90,7 @@ pub struct EventData {
  * The `sourceCode` field from the Node.js version is omitted in the MVP
  * because Rust binaries typically don't ship source alongside.
  */
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize)]
 pub struct BacktraceFrame {
     /// Source file path, if debug info is available.
     #[serde(skip_serializing_if = "Option::is_none")]

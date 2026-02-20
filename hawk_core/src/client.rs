@@ -67,6 +67,7 @@ pub fn get_client() -> Option<&'static Client> {
  * });
  * ```
  */
+#[derive(Default)]
 pub struct Options {
     /// Optional callback invoked before each event is sent.
     ///
@@ -79,14 +80,6 @@ pub struct Options {
     ///
     /// If not set, events are sent as-is.
     pub before_send: Option<Arc<dyn Fn(EventData) -> Option<EventData> + Send + Sync>>,
-}
-
-impl Default for Options {
-    fn default() -> Self {
-        Self {
-            before_send: None,
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -123,15 +116,6 @@ pub struct Client {
     before_send: Option<Arc<dyn Fn(EventData) -> Option<EventData> + Send + Sync>>,
 }
 
-/**
- * `Client` is `Send + Sync` because:
- * - `Sender<WorkerMsg>` is `Send + Sync`.
- * - `Arc<dyn Fn + Send + Sync>` is `Send + Sync`.
- * - All other fields are plain data.
- */
-unsafe impl Send for Client {}
-unsafe impl Sync for Client {}
-
 impl Client {
     /**
      * Creates a new `Client` and stores it in the global `OnceLock`.
@@ -156,6 +140,13 @@ impl Client {
      */
     pub fn init(token_str: &str, options: Options) -> Result<(), String> {
         /*
+         * Early guard: avoid spawning threads/HTTP clients if already initialized.
+         */
+        if GLOBAL_CLIENT.get().is_some() {
+            return Err("Hawk SDK is already initialized".into());
+        }
+
+        /*
          * Step 1: Decode the integration token.
          * This validates the token format and extracts the integrationId.
          */
@@ -179,7 +170,7 @@ impl Client {
          * Step 4: Create the transport (HTTP client) and spawn the worker.
          */
         let transport = Transport::new()?;
-        Worker::spawn(receiver, endpoint, transport);
+        Worker::spawn(receiver, endpoint, transport)?;
 
         /*
          * Step 5: Store in the global singleton.
@@ -283,7 +274,7 @@ impl Client {
          * by the time the worker processes this message, all preceding
          * Event messages will have been sent.
          */
-        match self.sender.try_send(WorkerMsg::Flush(signal.clone())) {
+        match self.sender.send_timeout(WorkerMsg::Flush(signal.clone()), FLUSH_TIMEOUT) {
             Ok(()) => signal.wait_timeout(FLUSH_TIMEOUT),
             Err(_) => false,
         }

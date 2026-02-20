@@ -154,13 +154,29 @@ impl Worker {
      * * `endpoint` — The collector URL to POST events to.
      * * `transport` — The HTTP transport used for sending.
      */
-    pub fn spawn(receiver: Receiver<WorkerMsg>, endpoint: String, transport: Transport) {
+    pub fn spawn(
+        receiver: Receiver<WorkerMsg>,
+        endpoint: String,
+        transport: Transport,
+    ) -> Result<(), String> {
         thread::Builder::new()
             .name("hawk-worker".into())
             .spawn(move || {
-                Self::run_loop(&receiver, &endpoint, &transport);
+                /*
+                 * Wrap the event loop in catch_unwind so a panic inside
+                 * transport.send() (e.g. reqwest bug) doesn't kill the
+                 * thread silently. We log and exit instead.
+                 */
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    Self::run_loop(&receiver, &endpoint, &transport);
+                }));
+
+                if result.is_err() {
+                    eprintln!("[Hawk] Worker thread panicked — events will be dropped");
+                }
             })
-            .expect("[Hawk] Failed to spawn worker thread");
+            .map(|_| ())
+            .map_err(|e| format!("Failed to spawn worker thread: {e}"))
     }
 
     /**

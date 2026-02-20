@@ -11,3 +11,11 @@ members = [
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
+rust-version = "1.82"
+
+[workspace.dependencies]
+hawk_core = { path = "hawk_core" }
+hawk_panic = { path = "hawk_panic" }
+backtrace = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

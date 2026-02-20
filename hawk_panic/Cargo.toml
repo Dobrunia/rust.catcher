@@ -3,8 +3,9 @@ name = "hawk_panic"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+rust-version.workspace = true
 description = "Panic hook integration for Hawk error tracking SDK"
 
 [dependencies]
-hawk_core = { path = "../hawk_core" }
-backtrace = "0.3"
+hawk_core.workspace = true
+backtrace.workspace = true

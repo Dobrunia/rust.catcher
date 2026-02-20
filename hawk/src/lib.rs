@@ -1,4 +1,4 @@
-/**
+/*!
  * Hawk — Rust error tracking SDK.
  *
  * This is the main crate users should depend on. It re-exports the core
@@ -45,7 +45,7 @@ use std::sync::Arc;
 
 pub use hawk_core::{
     BacktraceFrame, EventData, Guard, HawkEvent, CATCHER_VERSION,
-    send, capture_event, flush, get_backtrace, convert_backtrace,
+    send, capture_event, flush,
 };
 
 // ---------------------------------------------------------------------------

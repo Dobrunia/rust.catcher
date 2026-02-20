@@ -1,4 +1,4 @@
-/**
+/*!
  * Transport layer — HTTP delivery and background worker thread.
  *
  * Everything related to *how* we deliver events to the Hawk backend:

@@ -1,4 +1,4 @@
-/**
+/*!
  * SDK-wide constants.
  *
  * These values are baked into every event envelope and identify

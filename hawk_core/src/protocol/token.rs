@@ -79,18 +79,12 @@ pub fn decode_token(token: &str) -> Result<DecodedToken, String> {
         .map_err(|e| format!("Failed to base64-decode integration token: {e}"))?;
 
     /*
-     * Step 2: Interpret the decoded bytes as a UTF-8 JSON string.
+     * Step 2: Parse the decoded bytes directly as JSON.
+     * `from_slice` handles UTF-8 validation internally, avoiding
+     * an intermediate String allocation.
      */
-    let json_str = String::from_utf8(bytes)
-        .map_err(|e| format!("Integration token is not valid UTF-8: {e}"))?;
-
-    /*
-     * Step 3: Parse the JSON into our `DecodedToken` struct.
-     * serde handles the `camelCase` -> `snake_case` mapping via
-     * the `#[serde(rename_all = "camelCase")]` attribute.
-     */
-    let decoded: DecodedToken = serde_json::from_str(&json_str)
-        .map_err(|e| format!("Failed to parse integration token JSON: {e}"))?;
+    let decoded: DecodedToken = serde_json::from_slice(&bytes)
+        .map_err(|e| format!("Failed to parse integration token: {e}"))?;
 
     /*
      * Step 4: Validate that the integration ID is not empty — same check

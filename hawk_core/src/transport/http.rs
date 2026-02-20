@@ -1,60 +1,55 @@
-/**
+/*!
  * HTTP transport layer for sending events to the Hawk collector.
  *
- * This module wraps a `reqwest::blocking::Client` and provides a single
- * `send` method that POSTs a serialized `HawkEvent` envelope to the
- * collector endpoint.
+ * Uses `ureq` — a pure-Rust blocking HTTP client with no async runtime.
+ * This avoids pulling in tokio (which `reqwest::blocking` does under the hood),
+ * cutting compile time and binary size significantly.
  *
  * Design decisions:
  * - **Blocking HTTP** — the worker thread is already a dedicated background
- *   thread, so blocking I/O is perfectly fine and avoids pulling in a full
- *   async runtime.
+ *   thread, so blocking I/O is perfectly fine.
  * - **Best-effort delivery** — errors are logged to stderr but never
- *   propagated to the caller. The SDK must never crash the host application.
- * - **Single attempt** — no retries, no exponential backoff. This keeps the
- *   MVP simple. The backend is designed to be highly available; transient
- *   failures are acceptable to drop.
- * - **No `Authorization` header** — the Node.js catcher sends the token
- *   inside the JSON body, not as a header. We match that behaviour exactly.
+ *   propagated. The SDK must never crash the host application.
+ * - **Single attempt** — no retries. The backend is designed to be highly
+ *   available; transient failures are acceptable to drop.
  */
+
+use std::time::Duration;
+
+use ureq::Agent;
+
 use crate::protocol::types::HawkEvent;
 
-// ---------------------------------------------------------------------------
-// Transport
-// ---------------------------------------------------------------------------
-
 /**
- * Thin wrapper around `reqwest::blocking::Client` responsible for delivering
+ * Thin wrapper around `ureq::Agent` responsible for delivering
  * serialized events to the Hawk collector.
  *
- * A single `Transport` instance is created during `Client::new()` and shared
- * (moved into) the background worker thread.
+ * A single `Transport` instance is created during `Client::init()` and
+ * moved into the background worker thread.
  */
 pub struct Transport {
-    /// The underlying HTTP client. Reused across all requests to benefit
-    /// from connection pooling and keep-alive.
-    http: reqwest::blocking::Client,
+    agent: Agent,
 }
 
 impl Transport {
     /**
-     * Creates a new `Transport` with a default `reqwest::blocking::Client`.
+     * Creates a new `Transport` with a configured `ureq::Agent`.
      *
-     * The client is configured with sensible defaults:
-     * - 10-second connect timeout
-     * - 30-second total request timeout
+     * Timeouts:
+     * - 10 s connect
+     * - 30 s total per request
      *
-     * Returns `Err` only if reqwest fails to build the client (extremely
-     * rare — e.g. TLS backend unavailable).
+     * Connection pooling and keep-alive are handled by the agent internally.
      */
     pub fn new() -> Result<Self, String> {
-        let http = reqwest::blocking::Client::builder()
-            .connect_timeout(std::time::Duration::from_secs(10))
-            .timeout(std::time::Duration::from_secs(30))
+        let agent: Agent = Agent::config_builder()
+            .timeout_connect(Some(Duration::from_secs(10)))
+            .timeout_global(Some(Duration::from_secs(30)))
+            .http_status_as_error(false)
             .build()
-            .map_err(|e| format!("Failed to create HTTP client: {e}"))?;
+            .into();
 
-        Ok(Self { http })
+        Ok(Self { agent })
     }
 
     /**
@@ -63,33 +58,22 @@ impl Transport {
      * The event is serialized to JSON and POSTed with
      * `Content-Type: application/json`.
      *
-     * # Arguments
-     * * `endpoint` — The full collector URL, e.g.
-     *   `https://{integrationId}.k1.hawk.so/`.
-     * * `event` — The fully assembled `HawkEvent` envelope containing the
-     *   token, catcher type, and event payload.
-     *
-     * # Error handling
-     * This method is **best-effort**: any network or serialization error is
-     * printed to stderr and then swallowed. The SDK must never crash the
-     * host application.
+     * Best-effort: any error is printed to stderr and swallowed.
      */
     pub fn send(&self, endpoint: &str, event: &HawkEvent) {
-        let result = self.http
+        let result = self.agent
             .post(endpoint)
-            .json(event)
-            .send();
+            .send_json(event);
 
         match result {
             Ok(response) => {
-                if !response.status().is_success() {
-                    eprintln!(
-                        "[Hawk] Collector responded with HTTP {}: {}",
-                        response.status(),
-                        response
-                            .text()
-                            .unwrap_or_else(|_| "<unreadable body>".into())
-                    );
+                let status = response.status().as_u16();
+                if !(200..300).contains(&status) {
+                    let body = response
+                        .into_body()
+                        .read_to_string()
+                        .unwrap_or_else(|_| "<unreadable body>".into());
+                    eprintln!("[Hawk] Collector responded with HTTP {status}: {body}");
                 }
             }
             Err(err) => {
